@@ -3,6 +3,7 @@ from .mini_cpm4 import MiniCPMForCausalLM
 from .qwen3 import Qwen3ForCausalLM
 from .qwen3_moe import Qwen3MoeForCausalLM
 from .qwen3_vl import Qwen3VLForConditionalGeneration
+from .qwen2_5_omni import Qwen2_5OmniForConditionalGeneration
 
 model_dict = {
     "LlamaForCausalLM": LlamaForCausalLM,
@@ -10,5 +11,6 @@ model_dict = {
     "Qwen3ForCausalLM": Qwen3ForCausalLM,
     "Qwen3MoeForCausalLM": Qwen3MoeForCausalLM,
     "Qwen3VLForConditionalGeneration": Qwen3VLForConditionalGeneration,
+    "Qwen2_5OmniForConditionalGeneration": Qwen2_5OmniForConditionalGeneration,
     "MiniCPMForCausalLM": MiniCPMForCausalLM,
 }

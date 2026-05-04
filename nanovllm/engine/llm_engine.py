@@ -17,7 +17,7 @@ import torch.multiprocessing as mp
 
 from nanovllm.config import Config
 from nanovllm.sampling_params import SamplingParams
-from nanovllm.engine.sequence import Sequence
+from nanovllm.engine.sequence import Sequence, SequenceStatus
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.utils.logger import init_logger
@@ -47,7 +47,10 @@ class LLMEngine:
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)
-        self.warmup_model()
+        if getattr(kwargs, "skip_warmup", False):
+            logger.info("Skipping warmup as requested")
+        else:
+            self.warmup_model()
         atexit.register(self.exit)
 
     def prefill_warmup(self):
@@ -119,11 +122,25 @@ class LLMEngine:
 
     def step(self):
         seqs, is_prefill = self.scheduler.schedule()
+        logger.info(f"step: scheduled {len(seqs)} seqs, is_prefill={is_prefill}")
+
+        if not seqs:
+            logger.info(f"step: no seqs to process, returning empty")
+            return [], 0
+
         token_ids = self.model_runner.call("run", seqs, is_prefill)
+        logger.info(f"step: got token_ids={token_ids if len(token_ids) < 10 else token_ids[:10]}")
         self.scheduler.postprocess(seqs, token_ids)
         outputs = [(seq.seq_id, seq.completion_token_ids, seq.num_prompt_tokens, seq.num_cached_tokens) for seq in seqs
                    if seq.is_finished]
+        logger.info(f"step: finished outputs={len(outputs)}")
+        # Also return running sequences that have completion tokens (for streaming)
+        for seq in seqs:
+            if not seq.is_finished and seq.status == SequenceStatus.RUNNING and seq.num_completion_tokens > 0:
+                logger.info(f"step: adding running seq {seq.seq_id} with {len(seq.completion_token_ids)} tokens")
+                outputs.append((seq.seq_id, seq.completion_token_ids, seq.num_prompt_tokens, seq.num_cached_tokens))
         num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)
+        logger.info(f"step: total outputs={len(outputs)}, num_tokens={num_tokens}")
         return outputs, num_tokens
 
     def abort_request(self, request_id: str) -> None:
@@ -136,6 +153,15 @@ class LLMEngine:
 
     def is_finished(self):
         return self.scheduler.is_finished()
+
+    def find_sequence_by_id(self, seq_id):
+        for seq in self.scheduler.waiting:
+            if seq.seq_id == seq_id:
+                return seq
+        for seq in self.scheduler.running:
+            if seq.seq_id == seq_id:
+                return seq
+        return None
 
     def generate(
             self,

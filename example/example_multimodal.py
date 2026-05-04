@@ -8,7 +8,8 @@ from PIL import Image
 from transformers import AutoProcessor
 from nanovllm import LLM, SamplingParams
 
-DEFAULT_IMAGE_URL = "/data_mount/linzm/nano-vllm-ascend/example/asset/fanren.jpg"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_IMAGE_URL = os.path.join(_HERE, "asset", "fanren.jpg")
 DEFAULT_PROMPT = "描述图片内容"
 
 
@@ -20,14 +21,16 @@ def load_local_image(path: str) -> Image.Image:
 
 
 def main() -> None:
-    model_path = os.path.expanduser("/data_mount/models/Qwen3-VL-2B-Instruct")
+    model_path = os.path.expanduser("/data/model/Qwen3-VL-2B-Instruct")
     llm = LLM(
         model_path,
-        enforce_eager=True,
+        enforce_eager=False,
+        use_graph_cache=False,
         tensor_parallel_size=1,
         hccl_port=28801,
         gpu_memory_utilization=0.4,
-        kvcache_block_size=128
+        kvcache_block_size=128,
+        max_num_seqs=16
     )
 
     processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
@@ -47,10 +50,12 @@ def main() -> None:
     )
 
     request = {"text": chat_prompt, "images": [image]}
+    batch_requests = [{"text": chat_prompt, "images": [image]} for _ in range(10)]
+
     print(f"request: {request}")
     sampling_params = SamplingParams(temperature=0.7, max_tokens=512)
     outputs = llm.generate_multimodal(
-        [request],
+        batch_requests,
         sampling_params,
         processor,
         use_tqdm=False,

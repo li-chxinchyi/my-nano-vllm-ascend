@@ -9,8 +9,9 @@ logger = init_logger(__name__)
 def main():
     path = os.path.expanduser("/data/model/Qwen3-0.6B")
     tokenizer = AutoTokenizer.from_pretrained(path)
-    llm = LLM(path, enforce_eager=False, tensor_parallel_size=1, max_num_seqs=16, kvcache_block_size=128, trust_remote_code=True)
-    sampling_params = SamplingParams(temperature=0.6, max_tokens=2048)
+    llm = LLM(path, enforce_eager=True, hccl_port=28803, tensor_parallel_size=1, max_num_seqs=4,
+              kvcache_block_size=128, num_kvcache_blocks=128, trust_remote_code=True)
+    sampling_params = SamplingParams(temperature=0.6, max_tokens=512)
 
     prompts = [
         "你是谁",

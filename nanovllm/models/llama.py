@@ -6,7 +6,7 @@ from transformers import LlamaConfig
 from nanovllm.layers.activation import SiluAndMul
 from nanovllm.layers.attention import Attention
 from nanovllm.layers.embed_head import ParallelLMHead, VocabParallelEmbedding
-from nanovllm.layers.layernorm import RMSNorm
+from nanovllm.layers.layernorm import NPURMSNorm as RMSNorm
 from nanovllm.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,

@@ -1,0 +1,13 @@
+{
+  "op": "NpuMoeGatingTopKSoftmax",
+  "te_type": "te",
+  "binary_file": "moe_gating_top_k_softmax_ascend_c.so",
+  "binary_file_prefix_prefix": "",
+  "build_type": "clang",
+  "skip": {
+    "return_codes": [
+      "0"
+    ]
+  },
+  "enable_op_debug_level": "0"
+}

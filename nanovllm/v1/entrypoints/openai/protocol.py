@@ -1,0 +1,201 @@
+import time
+from typing import Dict, List, Literal, Optional, Union
+from pydantic import BaseModel, Field
+
+from nanovllm.sampling_params import SamplingParams
+
+
+class ErrorResponse(BaseModel):
+    object: str = "error"
+    message: str
+    type: str
+    param: Optional[str] = None
+    code: int
+
+
+class ModelPermission(BaseModel):
+    id: str = Field(default_factory=lambda: f"modelperm-{int(time.time())}")
+    object: str = "model_permission"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    allow_create_engine: bool = False
+    allow_sampling: bool = True
+    allow_logprobs: bool = True
+    allow_search_indices: bool = False
+    allow_view: bool = True
+    allow_fine_tuning: bool = False
+    organization: str = "*"
+    group: Optional[str] = None
+    is_blocking: str = False
+
+
+class ModelCard(BaseModel):
+    id: str
+    object: str = "model"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    owned_by: str = "vllm"
+    root: Optional[str] = None
+    parent: Optional[str] = None
+    permission: List[ModelPermission] = Field(default_factory=list)
+
+
+class ModelList(BaseModel):
+    object: str = "list"
+    data: List[ModelCard] = Field(default_factory=list)
+
+
+class UsageInfo(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    completion_tokens: Optional[int] = 0
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str
+    messages: Union[str, List[Dict[str, str]]]
+    temperature: Optional[float] = 0.7
+    top_p: Optional[float] = 1.0
+    n: Optional[int] = 1
+    max_tokens: Optional[int] = None
+    stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
+    stream: Optional[bool] = False
+    presence_penalty: Optional[float] = 0.0
+    frequency_penalty: Optional[float] = 0.0
+    logit_bias: Optional[Dict[str, float]] = None
+    user: Optional[str] = None
+    best_of: Optional[int] = None
+    top_k: Optional[int] = -1
+    ignore_eos: Optional[bool] = False
+    use_beam_search: Optional[bool] = False
+    stop_token_ids: Optional[List[int]] = Field(default_factory=list)
+    skip_special_tokens: Optional[bool] = True
+    spaces_between_special_tokens: Optional[bool] = True
+    add_generation_prompt: Optional[bool] = True
+    echo: Optional[bool] = False
+    repetition_penalty: Optional[float] = 1.0
+    min_p: Optional[float] = 0.0
+    include_stop_str_in_output: Optional[bool] = False
+    length_penalty: Optional[float] = 1.0
+
+    def to_sampling_params(self) -> SamplingParams:
+        return SamplingParams(
+            temperature=max(self.temperature or 0.7, 0.1),
+            max_tokens=self.max_tokens or 64,
+            ignore_eos=self.ignore_eos or False,
+        )
+
+
+class CompletionRequest(BaseModel):
+    model: str
+    prompt: Union[List[int], List[List[int]], str, List[str]]
+    suffix: Optional[str] = None
+    max_tokens: Optional[int] = 16
+    temperature: Optional[float] = 1.0
+    top_p: Optional[float] = 1.0
+    n: Optional[int] = 1
+    stream: Optional[bool] = False
+    logprobs: Optional[int] = None
+    echo: Optional[bool] = False
+    stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
+    presence_penalty: Optional[float] = 0.0
+    frequency_penalty: Optional[float] = 0.0
+    best_of: Optional[int] = None
+    logit_bias: Optional[Dict[str, float]] = None
+    user: Optional[str] = None
+    top_k: Optional[int] = -1
+    ignore_eos: Optional[bool] = False
+    use_beam_search: Optional[bool] = False
+    stop_token_ids: Optional[List[int]] = Field(default_factory=list)
+    skip_special_tokens: Optional[bool] = True
+    spaces_between_special_tokens: Optional[bool] = True
+    repetition_penalty: Optional[float] = 1.0
+    min_p: Optional[float] = 0.0
+    include_stop_str_in_output: Optional[bool] = False
+    length_penalty: Optional[float] = 1.0
+
+    def to_sampling_params(self):
+        echo_without_generation = self.echo and self.max_tokens == 0
+
+        return SamplingParams(
+            temperature=max(self.temperature or 1.0, 0.1),
+            max_tokens=self.max_tokens if not echo_without_generation else 1,
+            ignore_eos=self.ignore_eos or False,
+        )
+
+
+class LogProbs(BaseModel):
+    text_offset: List[int] = Field(default_factory=list)
+    token_logprobs: List[Optional[float]] = Field(default_factory=list)
+    tokens: List[str] = Field(default_factory=list)
+    top_logprobs: Optional[List[Optional[Dict[int, float]]]] = None
+
+
+class CompletionResponseChoice(BaseModel):
+    index: int
+    text: str
+    logprobs: Optional[LogProbs] = None
+    finish_reason: Optional[Literal["stop", "length"]] = None
+
+
+class CompletionResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"cmpl-{int(time.time())}")
+    object: str = "text_completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[CompletionResponseChoice]
+    usage: UsageInfo
+
+
+class CompletionResponseStreamChoice(BaseModel):
+    index: int
+    text: str
+    logprobs: Optional[LogProbs] = None
+    finish_reason: Optional[Literal["stop", "length"]] = None
+
+
+class CompletionStreamResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"cmpl-{int(time.time())}")
+    object: str = "text_completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[CompletionResponseStreamChoice]
+    usage: Optional[UsageInfo] = Field(default=None)
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatCompletionResponseChoice(BaseModel):
+    index: int
+    message: ChatMessage
+    finish_reason: Optional[Literal["stop", "length"]] = None
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"chatcmpl-{int(time.time())}")
+    object: str = "chat.completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionResponseChoice]
+    usage: UsageInfo
+
+
+class DeltaMessage(BaseModel):
+    role: Optional[str] = None
+    content: Optional[str] = None
+
+
+class ChatCompletionResponseStreamChoice(BaseModel):
+    index: int
+    delta: DeltaMessage
+    finish_reason: Optional[Literal["stop", "length"]] = None
+
+
+class ChatCompletionStreamResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"chatcmpl-{int(time.time())}")
+    object: str = "chat.completion.chunk"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionResponseStreamChoice]
+    usage: Optional[UsageInfo] = Field(default=None)

@@ -7,7 +7,7 @@ import torch.distributed as dist
 
 from nanovllm.layers.activation import SiluAndMul
 from nanovllm.layers.attention import Attention
-from nanovllm.layers.layernorm import RMSNorm
+from nanovllm.layers.layernorm import NPURMSNorm as RMSNorm
 from nanovllm.layers.linear import QKVParallelLinear, MergedColumnParallelLinear, RowParallelLinear
 from nanovllm.layers.embed_head import VocabParallelEmbedding, ParallelLMHead
 import math

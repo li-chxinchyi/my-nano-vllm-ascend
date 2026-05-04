@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage="https://github.com/linzm1007/nano-vllm-ascend"
+Homepage="https://open.codehub.huawei.com/innersource/nano-vllm-ascend_G/nano-vllm-ascend"
 
 [tool.setuptools.packages.find]
 where = ["."]

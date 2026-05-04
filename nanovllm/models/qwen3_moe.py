@@ -1,13 +1,13 @@
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from torch import nn
 from transformers import Qwen3MoeConfig
+import torch._dynamo as dynamo
 
 from nanovllm.layers.activation import SiluAndMul
 from nanovllm.layers.attention import Attention
 from nanovllm.layers.embed_head import ParallelLMHead, VocabParallelEmbedding
-from nanovllm.layers.layernorm import RMSNorm
+from nanovllm.layers.layernorm import NPURMSNorm as RMSNorm
 from nanovllm.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
@@ -148,16 +148,17 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
             ]
         )
 
+    @dynamo.disable # eager模式无图优化
     def forward(self, hidden_states: torch.Tensor):
-        sequence_length, hidden_dim = hidden_states.shape
         router_logits = self.gate(hidden_states)
 
-        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(
-            routing_weights, self.top_k, dim=-1
+        routing_weights, selected_experts, _ = torch.ops.npu.npu_moe_gating_top_k_softmax(
+            router_logits,
+            None,
+            self.top_k,
         )
-        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         routing_weights = routing_weights.to(hidden_states.dtype)
 
         final_hidden_states = torch.zeros(
@@ -166,23 +167,14 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
             device=hidden_states.device,
         )
 
-        expert_mask = torch.nn.functional.one_hot(
-            selected_experts, num_classes=self.num_experts
-        ).permute(2, 1, 0)
-
-        expert_hitted = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
-        for expert_idx in expert_hitted:
+        for expert_idx in range(self.num_experts):
+            expanded_experts = selected_experts == expert_idx
+            expert_mask = expanded_experts.any(dim=-1).float()
             expert_layer = self.experts[expert_idx]
-            idx, top_x = torch.where(expert_mask[expert_idx].squeeze(0))
-
-            current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-            current_hidden_states = (
-                    expert_layer(current_state) * routing_weights[top_x, idx, None]
-            )
-
-            final_hidden_states.index_add_(
-                0, top_x, current_hidden_states.to(hidden_states.dtype)
-            )
+            expert_input = hidden_states * expert_mask.unsqueeze(-1)
+            expert_output = expert_layer(expert_input)
+            expert_weight = (routing_weights * expanded_experts.float()).sum(dim=-1, keepdim=True)
+            final_hidden_states += expert_output * expert_weight
         return final_hidden_states
 
 

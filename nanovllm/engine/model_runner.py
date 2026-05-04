@@ -16,6 +16,7 @@ from nanovllm.engine.sequence import Sequence
 from nanovllm.layers.sampler import Sampler
 from nanovllm.models.models_map import model_dict
 from nanovllm.models.qwen3_vl import load_qwen3_vl_model
+from nanovllm.models.qwen2_5_omni import load_qwen2_5_omni_model
 from nanovllm.utils.context import set_context, reset_context, get_context
 from nanovllm.utils.loader import load_model
 from nanovllm.utils.logger import init_logger
@@ -47,6 +48,7 @@ class ModelRunner:
         self.is_multimodal = False
         self._load_strategies = {
             "qwen3_vl": self._load_qwen3_vl_strategy,
+            "qwen2_5_omni": self._load_qwen2_5_omni_strategy,
         }
         loader = self._load_strategies.get(self.model_type, self._load_default_strategy)
         self.model = loader()
@@ -81,6 +83,10 @@ class ModelRunner:
     def _load_qwen3_vl_strategy(self):
         self.is_multimodal = True
         return load_qwen3_vl_model(self.config.model, self.config)
+
+    def _load_qwen2_5_omni_strategy(self):
+        self.is_multimodal = True
+        return load_qwen2_5_omni_model(self.config.model, self.config)
 
     def _load_default_strategy(self):
         arch = self.hf_config.architectures[0]
@@ -133,6 +139,8 @@ class ModelRunner:
         """
         logger.info(f"graph mode: {config.graph_mode}")
         if config.graph_mode == GraphMode.MAX_AUTOTUNE.value:
+            import logging
+            # torch._logging.set_logs(dynamo=logging.DEBUG, aot=logging.DEBUG, output_code=True, graph_code=True, recompiles=True)
             if config.use_graph_cache:
                 self.compile_decode = torchair.inference.cache_compile(self.model.forward,
                                                                        config=self.compiler_config,
@@ -142,7 +150,7 @@ class ModelRunner:
             else:
                 npu_backend = torchair.get_npu_backend(compiler_config=self.compiler_config)
                 self.compile_decode = torch.compile(self.model.forward, dynamic=False, fullgraph=True,
-                                                    backend=npu_backend)
+                                                     backend=npu_backend)
         """
         reduce-overhead模式（aclgraph）：采用Capture&Replay方式实现任务一次捕获多次执行，Capture阶段捕获Stream任务到Device侧，暂不执行；
         Replay阶段从Host侧发出执行指令，Device侧再执行已捕获的任务，从而减少Host调度开销，提升性能。
@@ -196,6 +204,10 @@ class ModelRunner:
         config = self.config
         hf_config = config.hf_config
         text_config = getattr(hf_config, "text_config", hf_config)
+
+        if hasattr(hf_config, "thinker_config") and hasattr(hf_config.thinker_config, "text_config"):
+            text_config = hf_config.thinker_config.text_config
+
         free, total = torch.npu.mem_get_info()
         used = total - free
         peak = torch.npu.memory_stats()["allocated_bytes.all.peak"]
@@ -207,7 +219,22 @@ class ModelRunner:
             else text_config.hidden_size // text_config.num_attention_heads
         )
         num_layers = text_config.num_hidden_layers
-        block_bytes = (2 * num_layers * self.block_size * num_kv_heads * head_dim * text_config.torch_dtype.itemsize)
+
+        torch_dtype = getattr(text_config, "torch_dtype", None)
+        if torch_dtype is None:
+            torch_dtype = getattr(hf_config, "torch_dtype", None)
+        if torch_dtype is None:
+            torch_dtype = torch.float16
+        elif isinstance(torch_dtype, str):
+            dtype_map = {
+                "bf16": torch.bfloat16,
+                "fp16": torch.float16,
+                "float16": torch.float16,
+                "float32": torch.float32,
+            }
+            torch_dtype = dtype_map.get(torch_dtype, torch.float16)
+
+        block_bytes = (2 * num_layers * self.block_size * num_kv_heads * head_dim * torch_dtype.itemsize)
         available_mem = total * config.gpu_memory_utilization - used - peak + current
         config.num_kvcache_blocks = int(available_mem) // block_bytes
         assert config.num_kvcache_blocks > 0, "Failed to allocate any KV cache blocks due to insufficient memory."
@@ -216,7 +243,7 @@ class ModelRunner:
         logger.info(f"Single Block Size: {block_bytes / 1024 ** 2:.2f} MB")
         logger.info(f"Allocating {config.num_kvcache_blocks} blocks.")
         cache_shape = (2, num_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads * head_dim)
-        kv_cache = torch.empty(cache_shape, dtype=text_config.torch_dtype, device=self.device)
+        kv_cache = torch.empty(cache_shape, dtype=torch_dtype, device=self.device)
         kv_cache.zero_()
         logger.info(f"KV Cache allocated successfully shape: {cache_shape}")
         layer_id = 0
@@ -396,8 +423,10 @@ class ModelRunner:
             return self.model.compute_logits(self.compile_decode(input_ids, positions))
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
+        logger.info(f"run: is_prefill={is_prefill}, num_seqs={len(seqs)}")
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else (
             self.prepare_decode(seqs) if self.enforce_eager else self.prepare_decode_padding(seqs))
+        logger.info(f"run: input_ids={input_ids.shape}, positions={positions.shape}")
 
         # Track how many freshly decoded tokens each sequence contributes; the
         # model uses these lengths to align partial vision slices with text.
@@ -405,6 +434,7 @@ class ModelRunner:
         vision_slices_per_seq = None
 
         vision_slices_per_seq = self._get_vision_slices_per_seq(is_prefill, seqs, vision_slices_per_seq)
+        logger.info(f"run: prepared input, calling run_model")
 
         def _advance_vision_offsets():
             if not is_prefill or not self.is_multimodal:
@@ -438,6 +468,7 @@ class ModelRunner:
                     seq.cached_deepstack_tokens = None
 
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
+        logger.info(f"run: calling run_model, is_prefill={is_prefill}, input_ids.shape={input_ids.shape}")
         logits = self.run_model(
             input_ids,
             positions,
@@ -445,9 +476,12 @@ class ModelRunner:
             sequence_lengths=sequence_lengths,
             vision_slices_per_seq=vision_slices_per_seq,
         )
+        logger.info(f"run: run_model returned, logits.shape={logits.shape if hasattr(logits, 'shape') else 'scalar'}")
         _advance_vision_offsets()
 
+        logger.info(f"run: calling sampler, logits={type(logits)}")
         token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
+        logger.info(f"run: sampler returned, token_ids={token_ids}")
         reset_context()
         return token_ids
 

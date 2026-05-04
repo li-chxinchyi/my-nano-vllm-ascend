@@ -3,6 +3,9 @@ import torchair as tng
 import torch_npu
 from torch import nn
 from nanovllm.utils.context import get_context
+from nanovllm.utils.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class Attention(nn.Module):
@@ -22,12 +25,15 @@ class Attention(nn.Module):
     def _store_kvcache(self, k, v, context):
         block_size = self.block_size
         if context.is_prefill:
-            torch_npu._npu_reshape_and_cache(
-                k, v,
-                self.k_cache.view(self.k_cache.shape[0], block_size, self.num_kv_heads, self.head_dim),
-                self.v_cache.view(self.v_cache.shape[0], block_size, self.num_kv_heads, self.head_dim),
-                context.slot_mapping.int()
-            )
+            if hasattr(self.k_cache, 'shape') and self.k_cache.nelement() > 0:
+                k_cache_view = self.k_cache.view(self.k_cache.shape[0], block_size, self.num_kv_heads, self.head_dim)
+                v_cache_view = self.v_cache.view(self.v_cache.shape[0], block_size, self.num_kv_heads, self.head_dim)
+                torch_npu._npu_reshape_and_cache(
+                    k, v,
+                    k_cache_view,
+                    v_cache_view,
+                    context.slot_mapping.int()
+                )
         else:
             cast_key = k.view(k.shape[0], 1, -1).contiguous()
             cast_value = v.view(v.shape[0], 1, -1).contiguous()

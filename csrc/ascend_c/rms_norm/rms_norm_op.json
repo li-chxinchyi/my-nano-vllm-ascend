@@ -1,0 +1,58 @@
+{
+  "op": "RmsNorm",
+  "input_desc": [
+    {
+      "name": "x",
+      "format": [
+        "ND"
+      ],
+      "shape": [
+        -2
+      ],
+      "dtype": [
+        "float16",
+        "float32",
+        "bfloat16"
+      ]
+    },
+    {
+      "name": "gamma",
+      "format": [
+        "ND"
+      ],
+      "shape": [
+        1
+      ],
+      "dtype": [
+        "float16",
+        "float32",
+        "bfloat16"
+      ]
+    }
+  ],
+  "output_desc": [
+    {
+      "name": "y",
+      "format": [
+        "ND"
+      ],
+      "shape": [
+        -2
+      ],
+      "dtype": [
+        "float16",
+        "float32",
+        "bfloat16"
+      ]
+    }
+  ],
+  "attr": [
+    {
+      "name": "epsilon",
+      "type": "float",
+      "value": 0.000001,
+      "default_value": 0.000001,
+      "required": false
+    }
+  ]
+}

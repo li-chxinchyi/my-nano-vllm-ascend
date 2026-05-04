@@ -122,6 +122,7 @@ class Sequence:
             "token_ids": self.token_ids,
             "status": self.status,
             "temperature": self.temperature,
+            "block_size": self.block_size,
         }
 
     def __setstate__(self, state):
@@ -132,6 +133,7 @@ class Sequence:
         self.token_ids = state["token_ids"]
         self.status = state["status"]
         self.temperature = state["temperature"]
+        self.block_size = state["block_size"]
         if self.token_ids:
             self.last_token = self.token_ids[-1]
         # Reset multimodal caches when the sequence is restored.
