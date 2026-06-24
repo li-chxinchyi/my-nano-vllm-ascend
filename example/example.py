@@ -7,7 +7,7 @@ logger = init_logger(__name__)
 
 
 def main():
-    path = os.path.expanduser("/data/model/Qwen3-0.6B")
+    path = os.path.expanduser("/home/licheng/model/Qwen2-0.5B-Instruct")
     tokenizer = AutoTokenizer.from_pretrained(path)
     llm = LLM(path, enforce_eager=True, hccl_port=28803, tensor_parallel_size=1, max_num_seqs=4,
               kvcache_block_size=128, num_kvcache_blocks=128, trust_remote_code=True)
