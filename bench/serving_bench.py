@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 from nanovllm import LLM, SamplingParams
 
 # --- Constants ---
-MODEL_PATH = os.path.expanduser("/data_mount/models/Qwen3-0.6B/")
+# MODEL_PATH = os.path.expanduser("/data_mount/models/Qwen3-0.6B/")
 MAX_INPUT_LEN = 1024
 MAX_OUTPUT_LEN = 1024
 
