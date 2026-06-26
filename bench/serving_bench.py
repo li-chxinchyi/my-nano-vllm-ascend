@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 from nanovllm import LLM, SamplingParams
 
 # --- Constants ---
-MODEL_PATH = os.path.expanduser("/home/licheng/data/Qwen2-0.5B-Instrct/")
+MODEL_PATH = os.path.expanduser("/home/licheng/data/Qwen2-0.5B-Instruct/")
 MAX_INPUT_LEN = 1024
 MAX_OUTPUT_LEN = 1024
 
@@ -115,7 +115,7 @@ def main():
                     if seq.seq_id in metrics:
                         metrics[seq.seq_id].record_first_token()
 
-                for seq_id, output_ids in finished_outputs:
+                for seq_id, output_ids, *_ in finished_outputs:
                     if seq_id in metrics:
                         metrics[seq_id].record_first_token()  # Ensure first token time is recorded
                         metrics[seq_id].record_completion(output_ids)
